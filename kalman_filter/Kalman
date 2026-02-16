@@ -1,0 +1,131 @@
+// ============================================================================
+// 2-State Kalman Filter AOI (Position + Velocity Observer)
+// Taylor Turner <resume.tturner@gmail.com>
+//
+// ----------------------------------------------------------------------------
+// Summary
+// ----------------------------------------------------------------------------
+// - Discrete Kalman filter for a constant-velocity model (2-state).
+// - Inputs: measured position-like signal `x`, timestep `dt` (ms), tuning.
+// - Outputs: filtered estimate `y` (x̂) and estimated velocity `y_dot` (v̂).
+//
+// Model (constant velocity, position-only measurement)
+//   State:      [ x_est ; x_dot_est ]
+//   Predict:    x_est(k+1)     = x_est(k) + dt * x_dot_est(k)
+//              x_dot_est(k+1) = x_dot_est(k)
+//   Measure:    x_meas = x_est
+//
+// Timebase
+//   - `dt` provided in milliseconds (e.g., Timer.PRE), converted to seconds.
+//
+// Covariance storage (row-major)
+//   P[0]=P00 var(x), P[1]=P01 cov(x,v), P[2]=P10 cov(v,x), P[3]=P11 var(v)
+//
+// Tuning (per-update variances)
+//   q_x     : process noise variance for x (position drift allowance)
+//   q_x_dot : process noise variance for x_dot (velocity adaptability)
+//   r_x     : measurement noise variance for x (trust in measurement)
+//   Larger r_x => smoother y but more lag.
+//
+// Optional "Bleed"
+//   - Decays velocity estimate when near-stationary to reduce corner overshoot.
+// ============================================================================
+
+IF NOT EnableIn THEN
+    // Disable => re-arm init. Pass-through outputs for deterministic behavior.
+    init := 0;
+    y := x;
+    y_dot := 0.0;
+
+ELSE
+    // Convert ms -> seconds. dt_s must be > 0 to run predict/update.
+    IF dt <= 0.0 THEN
+        dt_s := 0.0;
+    ELSE
+        dt_s := dt / 1000.0;
+    END_IF;
+
+    // One-time initialization after enable
+    IF NOT init THEN
+        x_pred := x;        // start estimate at measurement
+        x_dot_pred := 0.0;  // assume stationary initially
+
+        // Initial covariance (tweak as needed)
+        P[0] := 1.0;   // P00
+        P[1] := 0.0;   // P01
+        P[2] := 0.0;   // P10
+        P[3] := 10.0;  // P11
+
+        K0 := 0.0;
+        K1 := 0.0;
+
+        init := 1;
+    END_IF;
+
+    IF dt_s > 0.0 THEN
+
+        // =====================
+        // PREDICT (time update)
+        // =====================
+        // Predict state using constant-velocity model
+        x_pred := x_pred + (dt_s * x_dot_pred);
+
+        // Predict covariance: P' = F*P*F^T + Q
+        // F = [[1, dt],
+        //      [0, 1 ]]
+        // Q is diagonal: diag(q_x, q_x_dot)
+        x_cov[0] := (P[0] + dt_s * P[2]) + dt_s * (P[1] + dt_s * P[3]); // P00'
+        x_cov[1] := (P[1] + dt_s * P[3]);                               // P01'
+        x_cov[2] := (P[2] + dt_s * P[3]);                               // P10'
+        x_cov[3] := (P[3]);                                             // P11'
+
+        // Add process noise (uncertainty growth per update)
+        x_cov[0] := x_cov[0] + q_x;
+        x_cov[3] := x_cov[3] + q_x_dot;
+
+        // =====================
+        // UPDATE (measurement)
+        // =====================
+        // Innovation (residual): measurement minus prediction
+        y_res := x - x_pred;
+
+        // Innovation variance: expected residual variance
+        // S = P00' + r_x (H = [1 0])
+        S := x_cov[0] + r_x;
+
+        IF S > 0.0 THEN
+            // Kalman gains (how much to correct from residual)
+            K0 := x_cov[0] / S; // position gain
+            K1 := x_cov[2] / S; // velocity gain
+
+            // Correct state
+            x_pred := x_pred + (K0 * y_res);
+            x_dot_pred := x_dot_pred + (K1 * y_res);
+
+            // Optional: bleed velocity toward 0 when near-stationary
+            IF BleedEnable THEN
+                IF ABS(x - x_pred) < BleedThresh THEN
+                    x_dot_pred := x_dot_pred * BleedFactor;
+                END_IF;
+            END_IF;
+
+            // Covariance update: P = (I - K*H) * P'
+            P[0] := (1.0 - K0) * x_cov[0];
+            P[1] := (1.0 - K0) * x_cov[1];
+            P[2] := x_cov[2] - (K1 * x_cov[0]);
+            P[3] := x_cov[3] - (K1 * x_cov[1]);
+
+            // Enforce symmetry: keep P10 == P01 (numerical drift guard)
+            P[2] := P[1];
+        END_IF;
+
+        // Outputs
+        y := x_pred;
+        y_dot := x_dot_pred;
+
+    ELSE
+        // dt invalid -> pass-through
+        y := x;
+        y_dot := 0.0;
+    END_IF;
+END_IF;
