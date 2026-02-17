@@ -4,6 +4,9 @@
 \usepackage{graphicx}
 \usepackage{bm}
 \usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,calc}
+
 
 \setlength{\parindent}{0pt}
 
@@ -41,6 +44,32 @@ Under this execution model:
 
 {\setlength{\parindent}{2em}\indent
 The business of this work is to formalize a two-state constant-velocity Kalman observer and explicitly relate each theoretical component to its deterministic scalar implementation within such a procedural real-time environment. The emphasis is not on applying Kalman theory, but on demonstrating how the discrete-time equations map directly to bounded, scan-synchronous execution.}
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  font=\small,
+  node distance=5mm,
+  box/.style={draw, align=center, inner sep=3pt},
+  arr/.style={-{Stealth[length=2.0mm]}, line width=0.5pt}
+]
+
+\node[box] (in) {Inputs\\$x_k,\ \Delta t_k$};
+\node[box, below=of in] (pred) {Predict\\$\hat{\mathbf{x}}^- ,\ P^-$};
+\node[box, below=of pred] (upd) {Update\\$y,S,\ K$\\$\hat{\mathbf{x}},\ P$};
+\node[box, below=of upd] (out) {Outputs\\$y=\hat{x}$\\$y_{\dot{}}=\hat{v}$};
+
+\draw[arr] (in) -- (pred);
+\draw[arr] (pred) -- (upd);
+\draw[arr] (upd) -- (out);
+
+% Feedback arrow
+\draw[arr] (upd.east) -- ++(10mm,0) |- (pred.east);
+
+\end{tikzpicture}
+\caption{Predict--update cycle per PLC scan with persistent state carried between scans.}
+\label{fig:compact_flow}
+\end{figure}
 
 \newpage
 %-------------------------------------------------
@@ -250,7 +279,7 @@ While not part of optimal Kalman theory, this heuristic mitigates overshoot at m
 %-------------------------------------------------
 \section{Experimental Validation}
 {\setlength{\parindent}{2em}\indent
-A deterministic ramp–hold–ramp–hold waveform was injected into the PLC at $\Delta t = 50$ ms using PyLogix. Measurement noise was added as bounded uniform noise:}
+A deterministic ramp–hold–ramp–hold waveform was injected into the PLC at $\Delta t = 50$ ms. Measurement noise was added as bounded uniform noise:}
 
 \begin{equation}
 x_{\mathrm{meas}}(k) = x_{\mathrm{true}}(k) + \eta_k,
@@ -265,7 +294,7 @@ x_{\mathrm{meas}}(k) = x_{\mathrm{true}}(k) + \eta_k,
 \end{figure}
 
 The filtered output demonstrates noise attenuation during steady-state holds, minimal phase lag during ramps, and predictable transient correction at discontinuities. The empirical behavior aligns with theoretical expectations derived from the discrete-time propagation equations.
-
+\newpage
 %-------------------------------------------------
 \section{Discussion}
 {\setlength{\parindent}{2em}\indent
@@ -479,5 +508,4 @@ ELSE
     END_IF;
 END_IF;
 \end{verbatim}
-
 \end{document}
